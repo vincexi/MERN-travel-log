@@ -1,17 +1,42 @@
 const { Router } = require('express');
+const RateLimit = require('express-rate-limit');
+const MongoStore = require('rate-limit-mongo');
 
 const LogEntry = require('../models/LogEntry');
 
+const {
+  API_KEY,
+  DATABASE_URL,
+} = process.env;
+
 const router = Router();
 
-router.get('/', (req, res) => {
-  res.json({
-    message: 'Hello',
-  });
+const rateLimitDelay = 10 * 1000;
+
+const limiter = new RateLimit({
+  store: new MongoStore({
+    uri: DATABASE_URL,
+    expireTimeMs: rateLimitDelay,
+  }),
+  max: 1,
+  windowMs: rateLimitDelay,
 });
 
-router.post('/', async (req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
+    const entries = await LogEntry.find();
+    res.json(entries);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/', limiter, async (req, res, next) => {
+  try {
+    if (req.get('X-API-KEY') !== API_KEY) {
+      res.status(401);
+      throw new Error('Unauthorized');
+    }
     const logEntry = new LogEntry(req.body);
     const createdEntry = await logEntry.save();
     res.json(createdEntry);
